@@ -53,12 +53,14 @@ class MicroTTTCell(nn.Module):
         self,
         x_t: torch.Tensor,
         w_prev: torch.Tensor,
+        compute_telemetry: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
         """Single test-time training step.
         
         Args:
             x_t: Current token representation (B, d_model)
             w_prev: Previous inner memory state (B, d_k, d_v)
+            compute_telemetry: Whether to compute CPU telemetry scalars
         Returns:
             y_t: Output token representation (B, d_model)
             w_next: Updated inner memory state (B, d_k, d_v)
@@ -79,12 +81,9 @@ class MicroTTTCell(nn.Module):
         target = v_t + self.target_proj(k_norm)
         error = pred - target  # e_t in R^{B x d_v}
 
-        # Closed-form rank-1 update: delta_W = e_t^T k_norm
-        # (B, d_k, 1) @ (B, 1, d_v) -> (B, d_k, d_v)
-        delta_w = torch.bmm(k_norm.unsqueeze(2), error.unsqueeze(1))
-
-        # Weight update with decay
-        w_next = self.decay * w_prev - self.lr * delta_w
+        # In-place fused rank-1 weight update with decay: W_t = decay * W_{t-1} - lr * (k^T @ error)
+        w_next = w_prev.clone()
+        w_next.mul_(self.decay).baddbmm_(k_norm.unsqueeze(2), error.unsqueeze(1), alpha=-self.lr)
 
         # Optional INT8 simulated quantization for extreme cache compression
         if self.quantize_int8:
@@ -96,10 +95,12 @@ class MicroTTTCell(nn.Module):
         y_inner = torch.bmm(q_norm.unsqueeze(1), w_next).squeeze(1)  # (B, d_v)
         y_t = self.out_proj(y_inner)
 
-        telemetry = {
-            "error_norm": float(torch.norm(error, p=2, dim=-1).mean().item()),
-            "w_norm": float(torch.norm(w_next, p=2, dim=(-2, -1)).mean().item()),
-        }
+        telemetry: Dict[str, float] = {}
+        if compute_telemetry:
+            telemetry = {
+                "error_norm": float(torch.norm(error, p=2, dim=-1).mean().item()),
+                "w_norm": float(torch.norm(w_next, p=2, dim=(-2, -1)).mean().item()),
+            }
 
         return y_t, w_next, telemetry
 
@@ -110,6 +111,9 @@ class MicroTTTCell(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sequence-level forward pass over T tokens.
         
+        Accelerated via precomputed batched Q/K/V projections and fused in-place inner updates,
+        avoiding sequential layer launches and eliminating host-device CPU-GPU synchronizations.
+        
         Args:
             x: Input sequence of shape (B, T, d_model)
             w_init: Optional initial state (B, d_k, d_v)
@@ -119,15 +123,39 @@ class MicroTTTCell(nn.Module):
         """
         b, t, d = x.shape
         device = x.device
-        w_state = w_init if w_init is not None else self.init_state(b, device)
+        w_state = w_init.clone() if w_init is not None else self.init_state(b, device)
 
-        y_steps = []
+        # Precompute all token projections in parallel outside the recurrence loop
+        q_all = F.normalize(self.proj_q(x), p=2, dim=-1)    # (B, T, d_k)
+        k_all = F.normalize(self.proj_k(x), p=2, dim=-1)    # (B, T, d_k)
+        v_all = self.proj_v(x)                              # (B, T, d_v)
+        target_all = v_all + self.target_proj(k_all)        # (B, T, d_v)
+
+        y_inners = []
+        decay = self.decay
+        lr = self.lr
+        quantize_int8 = self.quantize_int8
+
         for s in range(t):
-            x_s = x[:, s, :]
-            y_s, w_state, _ = self.step(x_s, w_state)
-            y_steps.append(y_s)
+            k_s = k_all[:, s, :]  # (B, d_k)
+            # Inner prediction: pred = k_s @ W_{s-1}
+            pred = torch.bmm(k_s.unsqueeze(1), w_state).squeeze(1)  # (B, d_v)
+            error = pred - target_all[:, s, :]                      # (B, d_v)
+            
+            # Fused in-place weight update: W_s = decay * W_{s-1} - lr * (k_s^T @ error)
+            w_state.mul_(decay).baddbmm_(k_s.unsqueeze(2), error.unsqueeze(1), alpha=-lr)
+            
+            if quantize_int8:
+                scale = torch.max(torch.abs(w_state), dim=-1, keepdim=True)[0].clamp(min=1e-5) / 127.0
+                w_state = torch.round(w_state / scale).clamp(-128, 127) * scale
+                
+            q_s = q_all[:, s, :]
+            y_inner = torch.bmm(q_s.unsqueeze(1), w_state).squeeze(1)  # (B, d_v)
+            y_inners.append(y_inner)
 
-        outputs = torch.stack(y_steps, dim=1)
+        # Batched output projection over all tokens in one pass
+        y_stacked = torch.stack(y_inners, dim=1)  # (B, T, d_v)
+        outputs = self.out_proj(y_stacked)        # (B, T, d_model)
         return outputs, w_state
 
 
