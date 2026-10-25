@@ -2,9 +2,9 @@
   "project": "micro-ttt-edge",
   "device": "mps",
   "seq_len": 2048,
-  "throughput_tok_s": 5121.894300559888,
-  "ms_per_token": 0.19524026489392554,
+  "throughput_tok_s": 6413.985916923835,
+  "ms_per_token": 0.15590929150022248,
   "state_kb": 8.0,
   "gate_passed": true,
-  "timestamp": 1792953161.038178
+  "timestamp": 1792966874.6792278
 }
