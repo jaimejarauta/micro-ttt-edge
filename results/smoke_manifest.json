@@ -1,0 +1,10 @@
+{
+  "project": "micro-ttt-edge",
+  "device": "mps",
+  "seq_len": 2048,
+  "throughput_tok_s": 1047.3514534350984,
+  "ms_per_token": 0.9547893371610883,
+  "state_kb": 8.0,
+  "gate_passed": true,
+  "timestamp": 1792952153.449804
+}
