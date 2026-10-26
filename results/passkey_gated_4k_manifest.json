@@ -1,0 +1,40 @@
+{
+  "git_commit": "79b0d208d78cf2244a2956b58949e45280753698",
+  "date": "2026-10-26T22:18:13Z",
+  "config": {
+    "train_len": 256,
+    "eval_lengths": [
+      256,
+      1024,
+      4096,
+      16384
+    ],
+    "eval_samples": 64,
+    "d_model": 64,
+    "num_layers": 2,
+    "steps": 4000,
+    "batch_size": 32,
+    "lr": 0.002,
+    "seed": 0,
+    "arms": [
+      "gated"
+    ],
+    "device": "cpu",
+    "save_dir": "checkpoints",
+    "output": "results/passkey_gated_4k_manifest.json"
+  },
+  "arms": [
+    {
+      "gated": true,
+      "accuracy": {
+        "256": 0.78125,
+        "1024": 0.828125,
+        "4096": 0.6875,
+        "16384": 0.75
+      },
+      "final_loss": 0.9201481938362122,
+      "train_sec": 986.0447690486908,
+      "gate_passed": false
+    }
+  ]
+}

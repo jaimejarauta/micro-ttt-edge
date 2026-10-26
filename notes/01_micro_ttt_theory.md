@@ -41,3 +41,9 @@ d_model 64, 2 layers, seed 0, CPU. Rule: >= 80% at every length.
 Both FAIL. The fixed-decay collapse at 4096 matches the retention bound (~0.997^n). The gated arm is flat in T,
 which is the property the 32k claim needs, but is undertrained (final loss 1.03 vs 0.001). Next: longer gated run.
 Manifest: results/passkey_train_manifest.json.
+
+Gated arm, 4000 steps, lr 2e-3 (results/passkey_gated_4k_manifest.json):
+T=256 78.1% | T=1024 82.8% | T=4096 68.8% | T=16384 75.0% (64 sequences each; +-~11 pts at 95%).
+FAIL (>= 80% at every length). Accuracy is flat in T up to 64x the training length, so the gates remove the decay
+limit; the remaining error is optimization (loss plateaus ~0.9, noisy). Next: train at T=1024 with a dense
+multi-key objective (Colab run 5b) rather than one supervised token per sequence.
