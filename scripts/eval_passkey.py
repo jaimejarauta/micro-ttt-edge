@@ -6,6 +6,11 @@ import os
 import time
 import torch
 import numpy as np
+import sys
+
+repo_src = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+if repo_src not in sys.path:
+    sys.path.insert(0, repo_src)
 
 from micro_ttt.model import MicroTTTModel
 from micro_ttt.tasks import generate_passkey_retrieval_batch
