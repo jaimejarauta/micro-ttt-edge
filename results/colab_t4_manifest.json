@@ -1,0 +1,16 @@
+{
+  "project": "micro-ttt-edge",
+  "run_type": "colab_t4_scaled",
+  "hardware": "Google Colab NVIDIA T4 GPU",
+  "date": "2026-10-26T13:16:00Z",
+  "seq_len": 32768,
+  "batch_size": 2,
+  "total_tokens": 65536,
+  "tokens_per_sec": 5510.4,
+  "ms_per_token": 0.181,
+  "inner_state_footprint_kb": 8.0,
+  "target_footprint_kb": 32.0,
+  "gate_name": "Pre-Registered Gate 1 (tokens_per_sec >= 100 and state_kb <= 32)",
+  "gate_status": "PASS",
+  "credits_consumed": 0.005
+}
