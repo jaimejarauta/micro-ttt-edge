@@ -27,3 +27,17 @@ For dimension $d_k = d_v = 32$:
 - For a 2-layer, 2-head edge model: $4 \times 4\text{ KB} = 16\text{ KB}$.
 - Typical L2 cache per CPU core is $512\text{ KB} - 1\text{ MB}$.
 - Thus, the entire state remains **100% resident in L2 cache**, achieving memory latency $< 5\text{ ns}$ per access.
+
+## Run log 2026-10-26: first trained runs (passkey)
+
+Train at T=256, evaluate held-out at T in {256, 1024, 4096}, 64 sequences each (chance 1/64). 1500 steps x 32,
+d_model 64, 2 layers, seed 0, CPU. Rule: >= 80% at every length.
+
+| Arm | T=256 | T=1024 | T=4096 |
+|---|---|---|---|
+| Fixed decay 0.999, fixed write rate | 100% | 81.2% | 9.4% |
+| Data-dependent gates | 71.9% | 75.0% | 71.9% |
+
+Both FAIL. The fixed-decay collapse at 4096 matches the retention bound (~0.997^n). The gated arm is flat in T,
+which is the property the 32k claim needs, but is undertrained (final loss 1.03 vs 0.001). Next: longer gated run.
+Manifest: results/passkey_train_manifest.json.
