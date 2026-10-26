@@ -22,6 +22,18 @@ def test_micro_ttt_model_forward():
     assert logits.shape == (2, 64, 100)
 
 
+def test_micro_ttt_backward():
+    """Verify autograd backward pass works cleanly without in-place modification errors."""
+    model = MicroTTTModel(vocab_size=100, d_model=32, d_k=16, d_v=16, num_layers=2)
+    input_ids = torch.randint(0, 100, (2, 32))
+    logits = model(input_ids)
+    loss = logits.sum()
+    loss.backward()
+    for p in model.parameters():
+        if p.requires_grad:
+            assert p.grad is not None
+
+
 def test_passkey_generation():
     batch = generate_passkey_retrieval_batch(seq_len=128, batch_size=2, vocab_size=100)
     assert batch["input_ids"].shape == (2, 127)

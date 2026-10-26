@@ -142,8 +142,11 @@ class MicroTTTCell(nn.Module):
             pred = torch.bmm(k_s.unsqueeze(1), w_state).squeeze(1)  # (B, d_v)
             error = pred - target_all[:, s, :]                      # (B, d_v)
             
-            # Fused in-place weight update: W_s = decay * W_{s-1} - lr * (k_s^T @ error)
-            w_state.mul_(decay).baddbmm_(k_s.unsqueeze(2), error.unsqueeze(1), alpha=-lr)
+            # Inner weight update: W_s = decay * W_{s-1} - lr * (k_s^T @ error)
+            if torch.is_grad_enabled():
+                w_state = torch.baddbmm(w_state, k_s.unsqueeze(2), error.unsqueeze(1), beta=decay, alpha=-lr)
+            else:
+                w_state.mul_(decay).baddbmm_(k_s.unsqueeze(2), error.unsqueeze(1), alpha=-lr)
             
             if quantize_int8:
                 scale = torch.max(torch.abs(w_state), dim=-1, keepdim=True)[0].clamp(min=1e-5) / 127.0
