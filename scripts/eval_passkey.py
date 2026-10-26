@@ -2,6 +2,7 @@
 """Multi-scale long-context passkey retrieval benchmark for Micro-TTT on Edge CPU/MPS."""
 
 import argparse
+import os
 import time
 import torch
 import numpy as np
