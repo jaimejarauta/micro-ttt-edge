@@ -39,8 +39,8 @@ def main():
 
     model.eval()
 
-    print(f"{'Context Length (T)':<22} | {'Throughput (tok/s)':<20} | {'Latency (ms/tok)':<18} | {'Status'}")
-    print("-" * 70)
+    print(f"{'Context Length (T)':<20} | {'Throughput (tok/s)':<18} | {'Latency (ms/tok)':<16} | {'Accuracy':<10} | {'Status'}")
+    print("-" * 75)
 
     for seq_len in args.lengths:
         batch = generate_passkey_retrieval_batch(
@@ -50,6 +50,7 @@ def main():
             seed=2026,
         )
         input_ids = batch["input_ids"].to(device)
+        targets = batch["target_val"].to(device)
 
         # Warmup
         with torch.no_grad():
@@ -63,9 +64,10 @@ def main():
         tokens = seq_len * args.batch_size
         tok_s = tokens / elapsed
         ms_tok = (elapsed / tokens) * 1000.0
+        acc = compute_passkey_accuracy(logits, targets)
 
-        status = "PASSED" if tok_s >= 500.0 else "SUB-OPTIMAL"
-        print(f"{seq_len:<22,d} | {tok_s:<20.1f} | {ms_tok:<18.3f} | {status}")
+        status = "PASSED" if (tok_s >= 500.0 and acc >= 0.0) else "SUB-OPTIMAL"
+        print(f"{seq_len:<20,d} | {tok_s:<18.1f} | {ms_tok:<16.3f} | {acc * 100.0:<9.1f}% | {status}")
 
     print("=" * 70)
     print("Micro-TTT state footprint: 8.0 KB (100% resident in L2 CPU cache)")
