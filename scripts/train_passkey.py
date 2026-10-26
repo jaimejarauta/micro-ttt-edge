@@ -69,6 +69,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=3e-3)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--arms", type=str, nargs="+", default=["fixed", "gated"], choices=["fixed", "gated"])
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--save-dir", type=str, default="checkpoints")
     p.add_argument("--output", type=str, default="results/passkey_train_manifest.json")
@@ -76,7 +77,7 @@ def main():
     device = torch.device(args.device)
 
     # Gate (2026-10-26): an arm passes if held-out accuracy >= 0.80 at every eval length (chance = 1/64)
-    arms = [train_arm(False, args, device), train_arm(True, args, device)]
+    arms = [train_arm(name == "gated", args, device) for name in args.arms]
     for a in arms:
         a["gate_passed"] = all(v >= 0.80 for v in a["accuracy"].values())
         accs = " | ".join(f"T={T}: {v * 100:.1f}%" for T, v in a["accuracy"].items())
