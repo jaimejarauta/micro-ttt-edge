@@ -25,6 +25,7 @@ class MicroTTTCell(nn.Module):
         lr: float = 0.05,
         decay: float = 0.999,
         quantize_int8: bool = False,
+        gated: bool = False,
     ):
         super().__init__()
         self.d_model = d_model
@@ -33,6 +34,7 @@ class MicroTTTCell(nn.Module):
         self.lr = lr
         self.decay = decay
         self.quantize_int8 = quantize_int8
+        self.gated = gated
 
         # Projections to inner key/value/query subspaces
         self.proj_q = nn.Linear(d_model, d_k, bias=False)
@@ -44,6 +46,12 @@ class MicroTTTCell(nn.Module):
 
         # Output projection back to d_model
         self.out_proj = nn.Linear(d_v, d_model, bias=False)
+
+        # Data-dependent write rate and decay (gated delta rule); fixed scalars cap retention near 1/(1 - decay)
+        if gated:
+            self.proj_gate = nn.Linear(d_model, 2)
+            with torch.no_grad():
+                self.proj_gate.bias.copy_(torch.tensor([0.0, math.log(decay / (1.0 - decay))]))
 
     def init_state(self, batch_size: int, device: torch.device) -> torch.Tensor:
         """Initialize inner weight matrix W_0 in R^{B x d_k x d_v}."""
@@ -82,8 +90,13 @@ class MicroTTTCell(nn.Module):
         error = pred - target  # e_t in R^{B x d_v}
 
         # In-place fused rank-1 weight update with decay: W_t = decay * W_{t-1} - lr * (k^T @ error)
-        w_next = w_prev.clone()
-        w_next.mul_(self.decay).baddbmm_(k_norm.unsqueeze(2), error.unsqueeze(1), alpha=-self.lr)
+        if self.gated:
+            g = self.proj_gate(x_t)
+            lr_t, decay_t = self.lr * torch.sigmoid(g[:, 0]), torch.sigmoid(g[:, 1])
+            w_next = decay_t[:, None, None] * w_prev - lr_t[:, None, None] * torch.bmm(k_norm.unsqueeze(2), error.unsqueeze(1))
+        else:
+            w_next = w_prev.clone()
+            w_next.mul_(self.decay).baddbmm_(k_norm.unsqueeze(2), error.unsqueeze(1), alpha=-self.lr)
 
         # Optional INT8 simulated quantization for extreme cache compression
         if self.quantize_int8:
@@ -130,6 +143,10 @@ class MicroTTTCell(nn.Module):
         k_all = F.normalize(self.proj_k(x), p=2, dim=-1)    # (B, T, d_k)
         v_all = self.proj_v(x)                              # (B, T, d_v)
         target_all = v_all + self.target_proj(k_all)        # (B, T, d_v)
+        if self.gated:
+            g = self.proj_gate(x)
+            lr_all = self.lr * torch.sigmoid(g[..., 0])     # (B, T)
+            decay_all = torch.sigmoid(g[..., 1])            # (B, T)
 
         y_inners = []
         decay = self.decay
@@ -143,7 +160,10 @@ class MicroTTTCell(nn.Module):
             error = pred - target_all[:, s, :]                      # (B, d_v)
             
             # Inner weight update: W_s = decay * W_{s-1} - lr * (k_s^T @ error)
-            if torch.is_grad_enabled():
+            if self.gated:
+                w_state = (decay_all[:, s, None, None] * w_state
+                           - lr_all[:, s, None, None] * torch.bmm(k_s.unsqueeze(2), error.unsqueeze(1)))
+            elif torch.is_grad_enabled():
                 w_state = torch.baddbmm(w_state, k_s.unsqueeze(2), error.unsqueeze(1), beta=decay, alpha=-lr)
             else:
                 w_state.mul_(decay).baddbmm_(k_s.unsqueeze(2), error.unsqueeze(1), alpha=-lr)
@@ -174,10 +194,11 @@ class MicroTTTBlock(nn.Module):
         lr: float = 0.05,
         decay: float = 0.999,
         dropout: float = 0.05,
+        gated: bool = False,
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
-        self.ttt = MicroTTTCell(d_model=d_model, d_k=d_k, d_v=d_v, lr=lr, decay=decay)
+        self.ttt = MicroTTTCell(d_model=d_model, d_k=d_k, d_v=d_v, lr=lr, decay=decay, gated=gated)
         self.norm2 = nn.LayerNorm(d_model)
         self.mlp = nn.Sequential(
             nn.Linear(d_model, d_ff),
@@ -211,13 +232,14 @@ class MicroTTTModel(nn.Module):
         num_layers: int = 2,
         lr: float = 0.05,
         decay: float = 0.999,
+        gated: bool = False,
     ):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.embed = nn.Embedding(vocab_size, d_model)
         self.layers = nn.ModuleList([
-            MicroTTTBlock(d_model=d_model, d_k=d_k, d_v=d_v, d_ff=d_ff, lr=lr, decay=decay)
+            MicroTTTBlock(d_model=d_model, d_k=d_k, d_v=d_v, d_ff=d_ff, lr=lr, decay=decay, gated=gated)
             for _ in range(num_layers)
         ])
         self.head = nn.Linear(d_model, vocab_size, bias=False)

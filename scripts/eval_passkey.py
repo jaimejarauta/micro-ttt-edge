@@ -22,7 +22,9 @@ def main():
     parser.add_argument("--lengths", type=int, nargs="+", default=[2048, 4096, 8192, 16384])
     parser.add_argument("--d-model", type=int, default=64)
     parser.add_argument("--num-layers", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--batch-size", type=int, default=64, help="Sequences per length (1 gave 0/1 or 1/1 accuracy)")
+    parser.add_argument("--checkpoint", type=str, default=None, help="State dict from scripts/train_passkey.py")
+    parser.add_argument("--gated", action="store_true", help="Model uses data-dependent gates")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
     parser.add_argument("--wandb-project", type=str, default="moonshot-micro-ttt-edge", help="W&B project")
@@ -63,7 +65,12 @@ def main():
         d_k=32,
         d_v=32,
         num_layers=args.num_layers,
+        gated=args.gated,
     ).to(device)
+    if args.checkpoint:
+        model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    else:
+        print("WARNING: no --checkpoint; evaluating random weights (control only)")
 
     model.eval()
 
@@ -75,7 +82,7 @@ def main():
             seq_len=seq_len,
             batch_size=args.batch_size,
             vocab_size=256,
-            seed=2026,
+            seed=10**9 + seq_len,  # held-out seeds, same as train_passkey.py evaluation
         )
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_val"].to(device)
@@ -94,7 +101,8 @@ def main():
         ms_tok = (elapsed / tokens) * 1000.0
         acc = compute_passkey_accuracy(logits, targets)
 
-        status = "PASSED" if (tok_s >= 500.0 and acc >= 0.0) else "SUB-OPTIMAL"
+        # Real scientific gate: requires >= 80% passkey recall accuracy
+        status = "PASSED" if (tok_s >= 500.0 and acc >= 0.80) else "FAILED"
         print(f"{seq_len:<20,d} | {tok_s:<18.1f} | {ms_tok:<16.3f} | {acc * 100.0:<9.1f}% | {status}")
 
         if use_wandb:
