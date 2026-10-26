@@ -37,7 +37,7 @@ def main():
                 mode=args.wandb_mode if not args.wandb else "online",
                 config={"lengths": args.lengths, "d_model": args.d_model, "num_layers": args.num_layers},
             )
-            print(f"[W&B] Initialized run '{wandb_run.name}' in project '{args.wandb_project}' (mode: {wandb_run.mode})")
+            print(f"[W&B] Initialized run '{wandb_run.name}' in project '{args.wandb_project}'")
         except Exception as e:
             print(f"[W&B Warning] Init skipped ({e}). Continuing locally.")
             use_wandb = False
