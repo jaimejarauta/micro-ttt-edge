@@ -18,7 +18,29 @@ def main():
     parser.add_argument("--num-layers", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
+    parser.add_argument("--wandb-project", type=str, default="moonshot-micro-ttt-edge", help="W&B project")
+    parser.add_argument("--wandb-name", type=str, default=None, help="W&B run display name")
+    parser.add_argument("--wandb-mode", type=str, default="online", choices=["online", "offline", "disabled"])
     args = parser.parse_args()
+
+    use_wandb = args.wandb or os.environ.get("WANDB_MODE") in ["online", "offline"]
+    wandb_run = None
+    if use_wandb:
+        try:
+            import wandb
+            entity = os.environ.get("WANDB_ENTITY", "research-projekts")
+            wandb_run = wandb.init(
+                project=args.wandb_project,
+                entity=entity,
+                name=args.wandb_name or f"micro-ttt-passkey-{int(time.time())}",
+                mode=args.wandb_mode if not args.wandb else "online",
+                config={"lengths": args.lengths, "d_model": args.d_model, "num_layers": args.num_layers},
+            )
+            print(f"[W&B] Initialized run '{wandb_run.name}' in project '{args.wandb_project}' (mode: {wandb_run.mode})")
+        except Exception as e:
+            print(f"[W&B Warning] Init skipped ({e}). Continuing locally.")
+            use_wandb = False
 
     device = torch.device(args.device) if args.device else (
         torch.device("mps") if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else torch.device("cpu")
@@ -69,9 +91,22 @@ def main():
         status = "PASSED" if (tok_s >= 500.0 and acc >= 0.0) else "SUB-OPTIMAL"
         print(f"{seq_len:<20,d} | {tok_s:<18.1f} | {ms_tok:<16.3f} | {acc * 100.0:<9.1f}% | {status}")
 
+        if use_wandb:
+            wandb.log({
+                "seq_len": seq_len,
+                "throughput_tok_s": tok_s,
+                "latency_ms_per_tok": ms_tok,
+                "passkey_accuracy": acc,
+            })
+
     print("=" * 70)
     print("Micro-TTT state footprint: 8.0 KB (100% resident in L2 CPU cache)")
     print("=" * 70)
+
+    if use_wandb and wandb_run:
+        wandb.summary["state_kb"] = 8.0
+        wandb.finish()
+        print("[W&B] Benchmark run successfully finished and synced.")
 
 
 if __name__ == "__main__":
