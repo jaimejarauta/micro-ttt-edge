@@ -50,9 +50,14 @@ def main():
             print(f"[W&B Warning] Init skipped ({e}). Continuing locally.")
             use_wandb = False
 
-    device = torch.device(args.device) if args.device else (
-        torch.device("mps") if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else torch.device("cpu")
-    )
+    if args.device:
+        device = torch.device(args.device)
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
 
     print("=" * 70)
     print("MICRO-TTT: MULTI-SCALE EXTREME LONG-CONTEXT RECALL BENCHMARK")
